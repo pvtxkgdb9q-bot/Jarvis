@@ -7,6 +7,7 @@ import { PROJECTS, SEED_NEURONS } from "../src/lib/seed.ts";
 test("la base de départ contient les 44 artefacts, tous rattachés à un projet connu", () => {
   const arts = SEED_NEURONS.filter((n) => n.type === "artifact");
   assert.equal(arts.length, 44);
+  assert.equal(SEED_NEURONS.filter((n) => n.type === "site").length, 7);
   assert.equal(new Set(arts.map((n) => n.id)).size, 44);
   for (const n of arts) {
     assert.ok(PROJECTS.some((p) => p.id === n.project), `projet inconnu pour ${n.title}`);
