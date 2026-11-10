@@ -1,0 +1,16 @@
+[
+  { "id": "mecamaster", "name": "MécaMaster", "hue": 195, "summary": "Application MécaMaster et ses guides d'installation / mise en ligne." },
+  { "id": "baryk", "name": "Le BARYK", "hue": 28, "summary": "Site, étiquette et plan de relance du BARYK." },
+  { "id": "cocon", "name": "Le Cocon de Bois", "hue": 95, "summary": "Site du Cocon de Bois." },
+  { "id": "sae31", "name": "SAE 3.1 · Essieu électrique 48 V", "hue": 265, "summary": "Essieu arrière électrifié : dossier, calculs de réduction, modèle 3D." },
+  { "id": "sae32", "name": "SAE 3.2 · Gestion de projet", "hue": 320, "summary": "Revues de projet, planning et Gantt de la SAE 3.2." },
+  { "id": "thermostat", "name": "Boîtier thermostat", "hue": 12, "summary": "Boîtier thermostat 5600426610 : modèle 3D et contrats de phase." },
+  { "id": "bic", "name": "Stylo Bic Cristal", "hue": 215, "summary": "Mode opératoire et fiche de contrôle du stylo Bic Cristal." },
+  { "id": "notices", "name": "Atelier Notices", "hue": 165, "summary": "Application de création de notices machines." },
+  { "id": "plans", "name": "Esquisse Plan", "hue": 50, "summary": "Éditeur de plans de maison." },
+  { "id": "orthoptie", "name": "Orthoptie", "hue": 290, "summary": "Carnet et logiciel d'orthoptie." },
+  { "id": "pompiers", "name": "Pompiers d'Ydes", "hue": 0, "summary": "Site des pompiers d'Ydes et suivi du matériel du centre de secours." },
+  { "id": "revisions", "name": "Révisions & cours", "hue": 140, "summary": "Fiches de révision et TP (ERP/MRP, roulements, RDM)." },
+  { "id": "industrie", "name": "Industrie & méthodes", "hue": 235, "summary": "TRS, audit, jumeau numérique, chaîne de production." },
+  { "id": "perso", "name": "Perso & divers", "hue": 70, "summary": "Carrière, design system et explorations." }
+]
