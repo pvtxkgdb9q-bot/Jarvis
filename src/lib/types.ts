@@ -17,6 +17,27 @@ export interface Neuron {
   updatedAt: string;
   source: Source;
   done?: boolean;
+  /** Échéance d'une tâche, au format AAAA-MM-JJ. */
+  due?: string;
+  important?: boolean;
+  /** Vrai si un neurone de la base fixe porte une annotation. */
+  edited?: boolean;
+}
+
+/** Annotation d'un neurone de la base fixe (le titre et le lien ne changent pas). */
+export interface Override {
+  project?: string;
+  kind?: Kind;
+  tags?: string[];
+  content?: string;
+}
+
+/** Toute la mémoire modifiable : ce document est ce qui est stocké. */
+export interface BrainState {
+  version: 2;
+  neurons: Neuron[];
+  overrides: Record<string, Override>;
+  projects: Project[];
 }
 
 export interface Project {
@@ -24,6 +45,7 @@ export interface Project {
   name: string;
   hue: number;
   summary: string;
+  custom?: boolean;
 }
 
 export interface NeuronInput {
@@ -34,13 +56,24 @@ export interface NeuronInput {
   project?: string;
   tags?: string[];
   done?: boolean;
+  kind?: Kind;
+  due?: string;
+  important?: boolean;
 }
+
+export interface ProjectInput {
+  name?: string;
+  summary?: string;
+}
+
+export type SiteHealth = { state: "up" | "protected" | "down"; status: number; ms: number };
 
 export interface Status {
   persistent: boolean;
   chat: boolean;
   mcp: boolean;
   vercelLive: boolean;
+  webSearch: boolean;
   model: string;
 }
 
@@ -64,4 +97,4 @@ export const KIND_LABEL: Record<Kind, string> = {
   planning: "Planning",
 };
 
-export const USER_TYPES: NeuronType[] = ["note", "task", "idea", "link"];
+export const USER_TYPES: NeuronType[] = ["note", "task", "idea", "link", "artifact", "site"];

@@ -7,14 +7,15 @@ interface Msg {
   role: "user" | "assistant";
   content: string;
   saved?: string[];
+  status?: string;
   error?: boolean;
 }
 const KEY = "jarvis.chat.v1";
 const SUGGESTIONS = [
-  "Fais-moi un point sur mes projets en cours.",
+  "Fais-moi le brief du jour.",
   "Quels cahiers des charges ai-je écrits, et pour quelles applications ?",
   "Retrouve tout ce qui concerne la SAE 3.1.",
-  "Note que je dois préparer la prochaine revue de projet.",
+  "Ajoute une tâche : préparer la prochaine revue de projet, pour vendredi.",
 ];
 
 /** Rendu Markdown minimal et sûr (aucun HTML injecté) : gras, code, liens, listes, titres. */
@@ -96,7 +97,7 @@ export function Chat({ brain, pending, clearPending }: { brain: Brain; pending: 
     setMsgs([...history, { role: "assistant", content: "" }]);
     setInput("");
     setBusy(true);
-    const update = (fn: (m: Msg) => Msg) => setMsgs((all) => [...all.slice(0, -1), fn(all[all.length - 1])]);
+    const update = (fn: (m: Msg) => Msg) => setMsgs((all) => (all.length ? [...all.slice(0, -1), fn(all[all.length - 1])] : all));
     let full = "";
     try {
       abort.current = new AbortController();
@@ -104,7 +105,7 @@ export function Chat({ brain, pending, clearPending }: { brain: Brain; pending: 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: abort.current.signal,
-        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })), localNeurons: brain.localNeurons }),
+        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })), localState: brain.localState }),
       });
       if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? `Erreur ${res.status}`);
       const reader = res.body.getReader();
@@ -121,11 +122,12 @@ export function Chat({ brain, pending, clearPending }: { brain: Brain; pending: 
           const ev = JSON.parse(line);
           if (ev.type === "text") {
             full += ev.delta;
-            update((m) => ({ ...m, content: full }));
-          } else if (ev.type === "neuron") {
-            brain.adopt(ev.neuron, ev.persisted);
-            update((m) => ({ ...m, saved: [...(m.saved ?? []), ev.neuron.title] }));
-          } else if (ev.type === "error") throw new Error(ev.message);
+            update((m) => ({ ...m, content: full, status: undefined }));
+          } else if (ev.type === "status") update((m) => ({ ...m, status: ev.text }));
+          else if (ev.type === "action") update((m) => ({ ...m, saved: [...(m.saved ?? []), ev.text] }));
+          else if (ev.type === "state") brain.setLocalState(ev.state);
+          else if (ev.type === "refresh") brain.reload();
+          else if (ev.type === "error") throw new Error(ev.message);
         }
       }
       if (speak && full && "speechSynthesis" in window) {
@@ -136,6 +138,7 @@ export function Chat({ brain, pending, clearPending }: { brain: Brain; pending: 
     } catch (e) {
       if ((e as Error).name !== "AbortError") update((m) => ({ ...m, content: full ? `${full}\n\n${(e as Error).message}` : (e as Error).message, error: true }));
     } finally {
+      update((m) => ({ ...m, status: undefined }));
       setBusy(false);
     }
   }
@@ -158,10 +161,10 @@ export function Chat({ brain, pending, clearPending }: { brain: Brain; pending: 
       <header className="view-head row">
         <div className="grow">
           <h1>Jarvis</h1>
-          <p className="lede">Claude, avec toute ta base de neurones en contexte.</p>
+          <p className="lede">Claude, avec toute ta base en contexte. Il peut noter, cocher, reclasser{brain.status?.webSearch ? " et chercher sur le web" : ""}.</p>
         </div>
         <button className={`icon-btn ${speak ? "on" : ""}`} onClick={() => { setSpeak(!speak); speechSynthesis?.cancel(); }} aria-pressed={speak} aria-label="Lire les réponses à voix haute"><Icon name="sound" /></button>
-        {msgs.length > 0 && <button className="btn ghost" onClick={() => { abort.current?.abort(); setMsgs([]); }}>Effacer</button>}
+        {msgs.length > 0 && <button className="btn ghost" onClick={() => { abort.current?.abort(); setMsgs([]); }}>Nouvelle conversation</button>}
       </header>
 
       {!enabled && (
@@ -181,10 +184,14 @@ export function Chat({ brain, pending, clearPending }: { brain: Brain; pending: 
         )}
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role} ${m.error ? "error" : ""}`}>
-            {m.role === "assistant" && !m.content && busy ? <span className="typing" aria-label="Jarvis réfléchit"><i /><i /><i /></span> : <Markdown text={m.content} />}
-            {m.saved?.map((t) => (
-              <span key={t} className="saved"><Icon name="memory" size={14} /> Mémorisé : {t}</span>
+            {m.role === "assistant" && !m.content && busy && i === msgs.length - 1 ? <span className="typing" aria-label="Jarvis réfléchit"><i /><i /><i /></span> : <Markdown text={m.content} />}
+            {m.status && <span className="saved status"><Icon name="globe" size={14} /> {m.status}</span>}
+            {m.saved?.map((t, k) => (
+              <span key={k} className="saved"><Icon name="memory" size={14} /> {t}</span>
             ))}
+            {m.role === "assistant" && m.content && !(busy && i === msgs.length - 1) && (
+              <button className="icon-btn copy-msg" onClick={() => navigator.clipboard.writeText(m.content)} aria-label="Copier la réponse"><Icon name="copy" size={14} /></button>
+            )}
           </div>
         ))}
         <div ref={end} />

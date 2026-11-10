@@ -1,14 +1,16 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { projectName, searchNeurons } from "@/lib/brain";
-import { KIND_LABEL, TYPE_LABEL } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { normalize, projectName, searchNeurons } from "@/lib/brain";
+import { KIND_LABEL, TYPE_LABEL, type Neuron, type NeuronInput } from "@/lib/types";
 import { BrainGraph } from "./BrainGraph";
 import { Chat } from "./Chat";
 import { Connect } from "./Connect";
+import { Editor } from "./Editor";
 import { Home } from "./Home";
 import { EMPTY_FILTER, Library, type LibraryFilter } from "./Library";
 import { Memory } from "./Memory";
-import { Icon } from "./ui";
+import { ProjectView } from "./ProjectView";
+import { Icon, type UI } from "./ui";
 import { useBrain } from "./useBrain";
 
 type Tab = "home" | "library" | "brain" | "chat" | "memory" | "connect";
@@ -21,39 +23,80 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "connect", label: "Lien Claude", icon: "link" },
 ];
 
+type Theme = "auto" | "light" | "dark";
+const THEME_LABEL: Record<Theme, string> = { auto: "Thème : auto", light: "Thème : clair", dark: "Thème : sombre" };
+
 export function JarvisApp() {
   const brain = useBrain();
   const [tab, setTab] = useState<Tab>("home");
+  const [project, setProject] = useState<string | null>(null);
   const [filter, setFilter] = useState<LibraryFilter>(EMPTY_FILTER);
   const [pending, setPending] = useState<string | null>(null);
   const [palette, setPalette] = useState(false);
+  const [editor, setEditor] = useState<{ neuron?: Neuron; defaults?: NeuronInput } | null>(null);
+  const [theme, setTheme] = useState<Theme>("auto");
+
+  const go = useCallback((t: Tab) => {
+    setProject(null);
+    setTab(t);
+    history.replaceState(null, "", `#${t}`);
+    window.scrollTo(0, 0);
+  }, []);
+  const ui = useMemo<UI>(
+    () => ({
+      edit: (neuron) => setEditor({ neuron }),
+      create: (defaults) => setEditor({ defaults }),
+      openProject: (id) => {
+        setProject(id);
+        history.replaceState(null, "", `#project/${encodeURIComponent(id)}`);
+        window.scrollTo(0, 0);
+      },
+      ask: (q) => {
+        setPending(q);
+        go("chat");
+      },
+    }),
+    [go],
+  );
 
   useEffect(() => {
-    const t = location.hash.slice(1) as Tab;
-    if (TABS.some((x) => x.id === t)) setTab(t);
+    const hash = decodeURIComponent(location.hash.slice(1));
+    if (hash.startsWith("project/")) setProject(hash.slice(8));
+    else if (TABS.some((x) => x.id === hash)) setTab(hash as Tab);
+    try {
+      const t = localStorage.getItem("jarvis.theme") as Theme | null;
+      if (t === "light" || t === "dark") setTheme(t);
+    } catch { /* thème automatique */ }
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette((p) => !p);
+        return;
       }
+      // Raccourcis à une touche : inactifs pendant la saisie ou dans une fenêtre.
+      const el = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey || el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || document.querySelector("dialog[open], .palette")) return;
+      if (e.key === "/") { e.preventDefault(); setPalette(true); }
+      else if (e.key === "n") { e.preventDefault(); setEditor({}); }
+      else if (/^[1-6]$/.test(e.key)) go(TABS[Number(e.key) - 1].id);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, []);
+  }, [go]);
 
-  const go = (t: Tab) => {
-    setTab(t);
-    history.replaceState(null, "", `#${t}`);
-    window.scrollTo(0, 0);
-  };
-  const openProject = (id: string) => {
-    setFilter({ ...EMPTY_FILTER, project: id });
-    go("library");
-  };
-  const ask = (q: string) => {
-    setPending(q);
-    go("chat");
-  };
+  function cycleTheme() {
+    const next: Theme = theme === "auto" ? "light" : theme === "light" ? "dark" : "auto";
+    setTheme(next);
+    if (next === "auto") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = next;
+    try {
+      if (next === "auto") localStorage.removeItem("jarvis.theme");
+      else localStorage.setItem("jarvis.theme", next);
+    } catch { /* non mémorisé */ }
+  }
 
   return (
     <div className="app">
@@ -63,7 +106,7 @@ export function JarvisApp() {
           <span>JARVIS</span>
         </div>
         {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} onClick={() => go(t.id)}>
+          <button key={t.id} className={!project && tab === t.id ? "on" : ""} aria-current={!project && tab === t.id ? "page" : undefined} onClick={() => go(t.id)}>
             <Icon name={t.icon} />
             <span>{t.label}</span>
           </button>
@@ -73,30 +116,43 @@ export function JarvisApp() {
           <span>Rechercher</span>
           <kbd>⌘K</kbd>
         </button>
+        <button className="theme-btn" onClick={cycleTheme} aria-label={`${THEME_LABEL[theme]}. Changer de thème`}>
+          <Icon name={theme === "light" ? "sun" : theme === "dark" ? "moon" : "target"} />
+          <span>{THEME_LABEL[theme]}</span>
+        </button>
       </nav>
 
       <main>
-        {brain.error && <div className="notice error" role="alert">{brain.error}</div>}
+        {brain.error && (
+          <div className="notice error toast" role="alert">
+            <span>{brain.error}</span>
+            <button className="icon-btn" onClick={brain.clearError} aria-label="Fermer le message"><Icon name="close" size={16} /></button>
+          </div>
+        )}
         {brain.loading ? (
           <div className="loading" role="status">Chargement de la base de neurones…</div>
+        ) : project ? (
+          <ProjectView brain={brain} ui={ui} id={project} back={() => go(tab)} />
         ) : (
           <>
-            {tab === "home" && <Home brain={brain} onOpenProject={openProject} onAsk={ask} />}
-            {tab === "library" && <Library brain={brain} filter={filter} setFilter={setFilter} />}
-            {tab === "brain" && <BrainGraph brain={brain} onOpenProject={openProject} />}
+            {tab === "home" && <Home brain={brain} ui={ui} />}
+            {tab === "library" && <Library brain={brain} ui={ui} filter={filter} setFilter={setFilter} />}
+            {tab === "brain" && <BrainGraph brain={brain} ui={ui} />}
             {tab === "chat" && <Chat brain={brain} pending={pending} clearPending={() => setPending(null)} />}
-            {tab === "memory" && <Memory brain={brain} />}
+            {tab === "memory" && <Memory brain={brain} ui={ui} />}
             {tab === "connect" && <Connect brain={brain} />}
           </>
         )}
       </main>
 
+      {editor && <Editor key={editor.neuron?.id ?? "new"} brain={brain} neuron={editor.neuron} defaults={editor.defaults} close={() => setEditor(null)} />}
+
       {palette && (
         <Palette
           brain={brain}
+          ui={ui}
           close={() => setPalette(false)}
           go={go}
-          ask={ask}
           searchLibrary={(q) => { setFilter({ ...EMPTY_FILTER, q }); go("library"); }}
         />
       )}
@@ -111,11 +167,11 @@ interface Item {
   run: () => void;
 }
 
-function Palette({ brain, close, go, ask, searchLibrary }: {
+function Palette({ brain, ui, close, go, searchLibrary }: {
   brain: ReturnType<typeof useBrain>;
+  ui: UI;
   close: () => void;
   go: (t: Tab) => void;
-  ask: (q: string) => void;
   searchLibrary: (q: string) => void;
 }) {
   const [q, setQ] = useState("");
@@ -128,22 +184,27 @@ function Palette({ brain, close, go, ask, searchLibrary }: {
     const text = q.trim();
     if (!text) {
       for (const t of TABS) out.push({ key: t.id, label: t.label, hint: "Aller à", run: () => go(t.id) });
+      out.push({ key: "_new", label: "Nouveau neurone", hint: "Touche n", run: () => ui.create() });
       return out;
+    }
+    const nq = normalize(text);
+    for (const p of brain.projects.filter((p) => normalize(p.name).includes(nq)).slice(0, 3)) {
+      out.push({ key: `p:${p.id}`, label: p.name, hint: "Projet", run: () => ui.openProject(p.id) });
     }
     for (const n of searchNeurons(brain.neurons, text, brain.projects).slice(0, 8)) {
       out.push({
         key: n.id,
         label: n.title,
         hint: [n.kind ? KIND_LABEL[n.kind] : TYPE_LABEL[n.type], projectName(n.project, brain.projects)].filter(Boolean).join(" · "),
-        run: () => (n.url ? window.open(n.url, "_blank", "noopener,noreferrer") : searchLibrary(n.title)),
+        run: () => (n.url ? window.open(n.url, "_blank", "noopener,noreferrer") : ui.edit(n)),
       });
     }
     out.push({ key: "_lib", label: `Chercher « ${text} » dans la bibliothèque`, hint: "Bibliothèque", run: () => searchLibrary(text) });
-    out.push({ key: "_ask", label: `Demander à Jarvis : « ${text} »`, hint: "Chat", run: () => ask(text) });
+    out.push({ key: "_ask", label: `Demander à Jarvis : « ${text} »`, hint: "Chat", run: () => ui.ask(text) });
     out.push({ key: "_note", label: `Créer une note : « ${text} »`, hint: "Mémoire", run: () => void brain.add({ type: "note", title: text }) });
     out.push({ key: "_task", label: `Créer une tâche : « ${text} »`, hint: "Mémoire", run: () => void brain.add({ type: "task", title: text }) });
     return out;
-  }, [q, brain, go, ask, searchLibrary]);
+  }, [q, brain, ui, go, searchLibrary]);
 
   useEffect(() => input.current?.focus(), []);
   useEffect(() => setIndex(0), [q]);

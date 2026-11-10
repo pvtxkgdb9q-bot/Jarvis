@@ -2,17 +2,20 @@
 
 Assistant personnel et base de neurones reliée à Claude : tous tes artefacts Claude, tes sites Vercel et ta mémoire (notes, tâches, idées) au même endroit, consultables par toi et par Claude.
 
-Le cahier des charges complet est dans [`docs/CAHIER_DES_CHARGES.md`](docs/CAHIER_DES_CHARGES.md).
-
 ## Ce que ça fait
 
-- **Accueil** — capture rapide, tâches à faire, favoris, récents, projets.
-- **Bibliothèque** — recherche et filtres sur toute la base.
+- **Accueil** — brief du jour, agenda des tâches (en retard, aujourd'hui, semaine), capture rapide, état des sites, projets.
+- **Bibliothèque** — recherche, filtres et tris sur toute la base ; ajout d'un artefact ou d'un site par son lien.
+- **Pages projet** — tout ce qui se rattache à un projet ; projets personnalisés.
 - **Cerveau** — graphe interactif des neurones et de leurs synapses.
-- **Jarvis** — chat avec Claude, toute la base en contexte ; il peut mémoriser ce que tu lui demandes.
-- **Mémoire** — notes, tâches, idées, liens.
+- **Jarvis** — chat avec Claude, toute la base en contexte ; il note, coche, reclasse et cherche sur le web.
+- **Mémoire** — notes, tâches avec échéance, idées, liens.
+- **Annotations** — tout artefact ou site peut être reclassé et résumé, sans toucher au dépôt.
 - **Lien Claude** — connecteur MCP : Claude lit et écrit dans la base depuis n'importe quelle conversation.
-- `⌘K` / `Ctrl K` — recherche et commandes depuis partout.
+- `⌘K` / `Ctrl K` ou `/` — recherche et commandes ; `n` nouveau neurone ; `1`–`6` changer d'écran.
+- Thème sombre, clair ou automatique ; installable sur téléphone.
+
+Documents : [cahier des charges v1](docs/CAHIER_DES_CHARGES.md) · [cahier des charges v2](docs/CAHIER_DES_CHARGES_V2.md) · [ce qu'il reste à faire soi-même](docs/A_FAIRE.md).
 
 ## Démarrer en local
 
@@ -37,6 +40,7 @@ npm run build     # build de production
 | `BLOB_READ_WRITE_TOKEN` | Mémoire persistante. Ajouté automatiquement en connectant un store **Blob privé** au projet. |
 | `VERCEL_TOKEN`, `VERCEL_TEAM_ID` | Facultatif : liste les projets Vercel en direct. |
 | `JARVIS_MODEL` | Facultatif : modèle du chat (défaut `claude-opus-5-5`). |
+| `JARVIS_WEB_SEARCH` | Facultatif : `off` désactive la recherche web du chat. |
 
 Redéploie après chaque changement de variable.
 
@@ -46,28 +50,27 @@ Redéploie après chaque changement de variable.
 2. Ouvre l'onglet **Lien Claude** de Jarvis et copie l'adresse du connecteur (`https://<domaine>/api/mcp/<jeton>`).
 3. Dans Claude : **Paramètres → Connecteurs → Ajouter un connecteur personnalisé**, colle l'adresse.
 
-Outils exposés : `rechercher`, `lister_projets`, `vue_d_ensemble`, `memoriser`, `modifier`, `oublier`.
+Outils exposés : `rechercher`, `lister_projets`, `vue_d_ensemble`, `taches`, `memoriser`, `modifier`, `oublier`, `creer_projet`.
+
+Les clients qui acceptent un en-tête peuvent utiliser `https://<domaine>/api/mcp` avec `Authorization: Bearer <jeton>`.
 
 ## Ajouter un artefact ou un site
 
-- **Artefact** : ajoute une entrée à [`data/artifacts.json`](data/artifacts.json) (`id` = fin de l'URL `claude.ai/artifact/<id>`), ou demande à Claude de l'enregistrer comme lien via le connecteur.
-- **Site Vercel** : ajoute une entrée à [`data/sites.json`](data/sites.json), ou définis `VERCEL_TOKEN` pour une liste en direct.
-
-```json
-{ "id": "mon-site", "name": "Mon site", "url": "https://mon-site.vercel.app", "project": "perso", "framework": "nextjs", "updated": "2026-11-10T00:00:00.000Z" }
-```
+- Dans Jarvis : **Bibliothèque → Ajouter**, colle le lien.
+- Depuis Claude : « Ajoute cet artefact à Jarvis ».
+- Dans le dépôt, pour la base d'origine : [`data/artifacts.json`](data/artifacts.json) et [`data/sites.json`](data/sites.json).
 
 ## Limite connue
 
-Claude n'expose pas d'API pour lister ou lire les artefacts d'un compte. Jarvis connaît donc leur titre, leur lien et leur classement, pas leur contenu, et les nouveaux artefacts ne s'ajoutent pas tout seuls.
+Claude n'expose pas d'API pour lister ou lire les artefacts d'un compte. Jarvis connaît donc leur titre, leur lien et leur classement, pas leur contenu : c'est le résumé (écrit par toi ou par Claude via le connecteur) qui le rend trouvable sur le fond. Les nouveaux artefacts s'ajoutent par leur lien.
 
 ## Structure
 
 ```
 data/            base fixe (artefacts, projets, sites)
 docs/            cahier des charges
-src/lib/         logique : brain (recherche, graphe), store, mcp, auth
-src/app/api/     routes : neurons, chat, mcp, auth, status
+src/lib/         logique : brain (règles pures), store, tools, mcp, auth
+src/app/api/     routes : neurons, projects, import, health, chat, mcp, auth, status
 src/components/  interface
 tests/           tests
 ```

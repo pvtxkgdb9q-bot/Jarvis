@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildGraph, normalize, projectName, type GraphNode } from "@/lib/brain";
 import { KIND_LABEL, TYPE_LABEL } from "@/lib/types";
-import { Icon, ProjectChip, relDate } from "./ui";
+import { Icon, ProjectChip, relDate, type UI } from "./ui";
 import type { Brain } from "./useBrain";
 
 interface P extends GraphNode {
@@ -14,9 +14,19 @@ interface P extends GraphNode {
 }
 
 /** Graphe de forces dessiné sur canvas : noyau → projets → neurones. */
-export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProject: (id: string) => void }) {
-  const { neurons, projects } = brain;
+type Show = "all" | "artifact" | "site" | "memory";
+const SHOWS: [Show, string][] = [["all", "Tout"], ["artifact", "Artefacts"], ["site", "Sites"], ["memory", "Mémoire"]];
+
+export function BrainGraph({ brain, ui }: { brain: Brain; ui: UI }) {
+  const { projects } = brain;
+  const [show, setShow] = useState<Show>("all");
+  const neurons = useMemo(
+    () => (show === "all" ? brain.neurons : brain.neurons.filter((n) => (show === "memory" ? n.source === "user" || n.source === "claude" : n.type === show))),
+    [brain.neurons, show],
+  );
   const graph = useMemo(() => buildGraph(neurons, projects), [neurons, projects]);
+  const open = useRef(ui.openProject);
+  open.current = ui.openProject;
   const canvas = useRef<HTMLCanvasElement>(null);
   const sim = useRef({ nodes: [] as P[], byId: new Map<string, P>(), alpha: 1, tx: 0, ty: 0, k: 1, hover: null as P | null, raf: 0 });
   const [selected, setSelected] = useState<GraphNode | null>(null);
@@ -108,6 +118,10 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
         if (!focus) return true;
         return n === focus || Boolean(near?.has(n.id));
       };
+      const css = getComputedStyle(cv);
+      const ink = css.getPropertyValue("--text").trim() || "#e8eef7";
+      const soft = css.getPropertyValue("--muted").trim() || "#8a9bb2";
+      const halo = css.getPropertyValue("--graph-bg").trim() || "#060a11";
       ctx.clearRect(0, 0, w, h);
       ctx.save();
       ctx.translate(w / 2 + s.tx, h / 2 + s.ty);
@@ -133,12 +147,12 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
           ctx.arc(n.x, n.y, n.size * 3, 0, 7);
           ctx.fill();
         }
-        ctx.fillStyle = n.kind === "core" ? "#eaf7ff" : `hsl(${n.hue}, 82%, ${n.kind === "project" ? 62 : 70}%)`;
+        ctx.fillStyle = n.kind === "core" ? ink : `hsl(${n.hue}, 82%, ${n.kind === "project" ? 62 : 70}%)`;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.size, 0, 7);
         ctx.fill();
         if (selected?.id === n.id) {
-          ctx.strokeStyle = "#fff";
+          ctx.strokeStyle = ink;
           ctx.lineWidth = 2 / s.k;
           ctx.beginPath();
           ctx.arc(n.x, n.y, n.size + 4 / s.k, 0, 7);
@@ -152,9 +166,9 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
           const text = n.label.length > 34 ? n.label.slice(0, 33) + "…" : n.label;
           const y = n.y + n.size + fs * 1.25;
           ctx.lineWidth = 4 / s.k;
-          ctx.strokeStyle = "rgba(6, 10, 17, 0.9)";
+          ctx.strokeStyle = halo;
           ctx.strokeText(text, n.x, y);
-          ctx.fillStyle = n.kind === "neuron" ? "#c3d0e0" : "#f2f7fd";
+          ctx.fillStyle = n.kind === "neuron" ? soft : ink;
           ctx.fillText(text, n.x, y);
         }
       }
@@ -191,11 +205,32 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
     };
 
     let drag: { node: P | null; x: number; y: number; moved: boolean } | null = null;
+    // Pincement à deux doigts : zoom tactile.
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinch = 0;
+    const spread = () => {
+      const [p1, p2] = [...touches.values()];
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    };
     const down = (e: PointerEvent) => {
       cv.setPointerCapture(e.pointerId);
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) {
+        pinch = spread();
+        drag = null;
+        return;
+      }
       drag = { node: hit(e), x: e.clientX, y: e.clientY, moved: false };
     };
     const move = (e: PointerEvent) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2 && pinch) {
+        const d = spread();
+        s.k = Math.min(4, Math.max(0.3, (s.k * d) / pinch));
+        pinch = d;
+        wake();
+        return;
+      }
       if (!drag) {
         const n = hit(e);
         if (n !== s.hover) { s.hover = n; cv.style.cursor = n ? "pointer" : "grab"; wake(); }
@@ -210,7 +245,9 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
         wake(0.3);
       } else { s.tx += dx; s.ty += dy; wake(); }
     };
-    const up = () => {
+    const up = (e: PointerEvent) => {
+      touches.delete(e.pointerId);
+      pinch = 0;
       if (drag) {
         if (drag.node) drag.node.fixed = false;
         if (!drag.moved) setSelected(drag.node && drag.node.kind !== "core" ? drag.node : null);
@@ -226,6 +263,10 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
       wake();
     };
     const leave = () => { if (s.hover) { s.hover = null; wake(); } };
+    const dbl = (e: MouseEvent) => {
+      const n = hit(e as PointerEvent);
+      if (n?.kind === "project" && n.projectId && n.projectId !== "_libre") open.current(n.projectId);
+    };
 
     const ro = new ResizeObserver(resize);
     ro.observe(cv);
@@ -235,7 +276,9 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
     cv.addEventListener("pointercancel", up);
     cv.addEventListener("pointerleave", leave);
     cv.addEventListener("wheel", wheel, { passive: false });
+    cv.addEventListener("dblclick", dbl);
     return () => {
+      cv.removeEventListener("dblclick", dbl);
       ro.disconnect();
       cancelAnimationFrame(s.raf);
       s.raf = 0;
@@ -258,7 +301,14 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
     s.k = Math.min(4, Math.max(0.3, s.k * f));
     (s as typeof s & { wake?: () => void }).wake?.();
   };
-  const sel = selected;
+  const recenter = () => {
+    const s = sim.current;
+    const cv = canvas.current!;
+    s.tx = s.ty = 0;
+    s.k = Math.min(1, Math.min(cv.clientWidth, cv.clientHeight) / 820);
+    (s as typeof s & { wake?: () => void }).wake?.();
+  };
+  const sel = selected && graph.nodes.some((n) => n.id === selected.id) ? selected : null;
   const members = sel?.kind === "project" ? neurons.filter((n) => (n.project || "_libre") === sel.projectId) : [];
   const linked = sel?.kind === "neuron" ? [...(neighbors.get(sel.id) ?? [])].map((id) => graph.nodes.find((n) => n.id === id)!).filter((n) => n.kind === "neuron") : [];
 
@@ -266,7 +316,7 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
     <div className="view graph-view">
       <header className="view-head">
         <h1>Cerveau</h1>
-        <p className="lede">{neurons.length} neurones, {graph.links.length} synapses. Clique un nœud, fais glisser pour explorer, molette pour zoomer.</p>
+        <p className="lede">{neurons.length} neurones, {graph.links.length} synapses. Clique un nœud, fais glisser pour explorer, molette ou pincement pour zoomer, double-clic sur un projet pour l'ouvrir.</p>
       </header>
       <div className="graph">
         <canvas ref={canvas} role="img" aria-label={`Graphe de la base de neurones : ${neurons.length} neurones répartis en ${graph.nodes.filter((n) => n.kind === "project").length} projets. La bibliothèque en donne la liste complète.`} />
@@ -274,7 +324,13 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
           <Icon name="search" size={16} />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Illuminer des neurones…" aria-label="Rechercher dans le graphe" />
         </label>
+        <div className="segmented graph-filter" role="group" aria-label="Type de neurones affichés">
+          {SHOWS.map(([id, label]) => (
+            <button key={id} className={show === id ? "on" : ""} aria-pressed={show === id} onClick={() => setShow(id)}>{label}</button>
+          ))}
+        </div>
         <div className="graph-zoom">
+          <button className="icon-btn" onClick={recenter} aria-label="Recentrer"><Icon name="target" size={16} /></button>
           <button className="icon-btn" onClick={() => zoom(1.3)} aria-label="Zoomer">+</button>
           <button className="icon-btn" onClick={() => zoom(1 / 1.3)} aria-label="Dézoomer">−</button>
         </div>
@@ -291,7 +347,7 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
                     <li key={n.id}>{n.url ? <a href={n.url} target="_blank" rel="noopener noreferrer">{n.title}</a> : n.title}</li>
                   ))}
                 </ul>
-                <button className="btn" onClick={() => onOpenProject(sel.projectId!)}>Voir dans la bibliothèque</button>
+                {sel.projectId !== "_libre" && <button className="btn" onClick={() => ui.openProject(sel.projectId!)}>Ouvrir le projet</button>}
               </>
             ) : (
               sel.neuron && (
@@ -313,9 +369,12 @@ export function BrainGraph({ brain, onOpenProject }: { brain: Brain; onOpenProje
                       </ul>
                     </>
                   )}
-                  {sel.neuron.url && (
-                    <a className="btn primary" href={sel.neuron.url} target="_blank" rel="noopener noreferrer"><Icon name="open" size={16} /> Ouvrir</a>
-                  )}
+                  <div className="row">
+                    {sel.neuron.url && (
+                      <a className="btn primary" href={sel.neuron.url} target="_blank" rel="noopener noreferrer"><Icon name="open" size={16} /> Ouvrir</a>
+                    )}
+                    <button className="btn" onClick={() => ui.edit(sel.neuron!)}><Icon name="edit" size={16} /> Modifier</button>
+                  </div>
                 </>
               )
             )}

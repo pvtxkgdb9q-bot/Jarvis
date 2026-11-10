@@ -1,7 +1,8 @@
 "use client";
-import type { ReactNode } from "react";
-import { projectName } from "@/lib/brain";
-import { KIND_LABEL, TYPE_LABEL, type Neuron, type Project } from "@/lib/types";
+import { useState, type ReactNode } from "react";
+import { isoDay, projectName } from "@/lib/brain";
+import { KIND_LABEL, TYPE_LABEL, type Neuron, type NeuronInput, type Project } from "@/lib/types";
+import type { Brain } from "./useBrain";
 
 const PATHS: Record<string, string> = {
   home: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10",
@@ -23,6 +24,10 @@ const PATHS: Record<string, string> = {
   check: "M5 12l5 5 9-10",
   copy: "M8 8h11v12H8zM5 16V4h11",
   logout: "M10 4H5v16h5M14 8l4 4-4 4M18 12H9",
+  sun: "M12 8a4 4 0 100 8 4 4 0 000-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.500 1.500M17.500 17.500L19 19M19 5l-1.500 1.500M6.500 17.500L5 19",
+  moon: "M20 14.500A8 8 0 019.500 4 8 8 0 1020 14.500z",
+  target: "M12 4a8 8 0 100 16 8 8 0 000-16zM12 9a3 3 0 100 6 3 3 0 000-6zM12 2v3M12 19v3M2 12h3M19 12h3",
+  globe: "M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18",
 };
 
 export function Icon({ name, size = 18 }: { name: keyof typeof PATHS | string; size?: number }) {
@@ -61,21 +66,41 @@ export function ProjectChip({ id, projects, onClick }: { id?: string; projects: 
   );
 }
 
-export function NeuronCard({ n, projects, favorite, onFavorite, onProject, actions }: {
-  n: Neuron;
-  projects: Project[];
-  favorite: boolean;
-  onFavorite: () => void;
-  onProject?: (id: string) => void;
-  actions?: ReactNode;
-}) {
+/** Actions d'interface partagées par tous les écrans. */
+export interface UI {
+  edit: (n: Neuron) => void;
+  create: (defaults?: NeuronInput) => void;
+  openProject: (id: string) => void;
+  ask: (q: string) => void;
+}
+
+const HEALTH_LABEL = { up: "En ligne", protected: "Protégé", down: "Hors ligne" } as const;
+
+export function dueLabel(due: string, today: string): { text: string; late: boolean } {
+  const days = Math.round((new Date(`${due}T00:00:00Z`).getTime() - new Date(`${today}T00:00:00Z`).getTime()) / 86400000);
+  if (days < 0) return { text: days === -1 ? "hier" : `en retard de ${-days} j`, late: true };
+  if (days === 0) return { text: "aujourd'hui", late: false };
+  if (days === 1) return { text: "demain", late: false };
+  if (days < 7) return { text: new Date(`${due}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long" }), late: false };
+  return { text: new Date(`${due}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }), late: false };
+}
+
+export function NeuronCard({ n, brain, ui }: { n: Neuron; brain: Brain; ui: UI }) {
+  const { projects, favorites, health } = brain;
+  const [copied, setCopied] = useState(false);
   const label = n.kind ? KIND_LABEL[n.kind] : TYPE_LABEL[n.type];
+  const favorite = favorites.has(n.id);
+  const h = n.type === "site" ? health[n.id] : undefined;
+  const due = n.type === "task" && n.due && !n.done ? dueLabel(n.due, isoDay(new Date())) : null;
   return (
     <article className={`card neuron ${n.done ? "is-done" : ""}`} style={{ "--h": hueOfProject(n.project, projects) } as React.CSSProperties}>
       <header>
         <span className="kind">{label}</span>
-        <span className="date">{relDate(n.updatedAt)}</span>
-        <button className={`icon-btn star ${favorite ? "on" : ""}`} onClick={onFavorite} aria-pressed={favorite} aria-label={favorite ? "Retirer des favoris" : "Ajouter aux favoris"}>
+        {h && <span className={`health ${h.state}`} title={`${HEALTH_LABEL[h.state]}${h.status ? ` · HTTP ${h.status}` : ""} · ${h.ms} ms`}>{HEALTH_LABEL[h.state]}</span>}
+        {n.important && !n.done && <span className="flag">Important</span>}
+        <span className="date">{due ? <span className={due.late ? "late" : ""}>{due.late ? due.text : `pour ${due.text}`}</span> : relDate(n.updatedAt)}</span>
+        {n.edited && <span className="edited" title="Annoté : diffère de la base d'origine">modifié</span>}
+        <button className={`icon-btn star ${favorite ? "on" : ""}`} onClick={() => brain.toggleFavorite(n.id)} aria-pressed={favorite} aria-label={favorite ? "Retirer des favoris" : "Ajouter aux favoris"}>
           <Icon name="star" size={16} />
         </button>
       </header>
@@ -88,16 +113,26 @@ export function NeuronCard({ n, projects, favorite, onFavorite, onProject, actio
       </h3>
       {n.content && <p className="content">{n.content}</p>}
       <footer>
-        <ProjectChip id={n.project} projects={projects} onClick={onProject && n.project ? () => onProject(n.project!) : undefined} />
+        <ProjectChip id={n.project} projects={projects} onClick={n.project ? () => ui.openProject(n.project!) : undefined} />
         {n.tags.slice(0, 3).map((t) => (
           <span key={t} className="tag">#{t}</span>
         ))}
         <span className="spacer" />
-        {actions}
+        {n.type === "task" && (
+          <button className={`icon-btn ${n.done ? "on" : ""}`} onClick={() => brain.patch(n.id, { done: !n.done })} aria-label={n.done ? `Marquer « ${n.title} » à faire` : `Marquer « ${n.title} » comme fait`}>
+            <Icon name="check" size={16} />
+          </button>
+        )}
+        <button className="icon-btn" onClick={() => ui.edit(n)} aria-label={`Modifier ${n.title}`}><Icon name="edit" size={16} /></button>
         {n.url && (
-          <a className="icon-btn" href={n.url} target="_blank" rel="noopener noreferrer" aria-label={`Ouvrir ${n.title}`}>
-            <Icon name="open" size={16} />
-          </a>
+          <>
+            <button className="icon-btn" onClick={() => navigator.clipboard.writeText(n.url!).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); })} aria-label={`Copier le lien de ${n.title}`}>
+              <Icon name={copied ? "check" : "copy"} size={16} />
+            </button>
+            <a className="icon-btn" href={n.url} target="_blank" rel="noopener noreferrer" aria-label={`Ouvrir ${n.title}`}>
+              <Icon name="open" size={16} />
+            </a>
+          </>
         )}
       </footer>
     </article>

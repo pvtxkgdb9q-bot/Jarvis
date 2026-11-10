@@ -2,17 +2,18 @@
 import { useMemo } from "react";
 import { projectName, searchNeurons } from "@/lib/brain";
 import { KIND_LABEL, type Kind, type Neuron } from "@/lib/types";
-import { Empty, Icon, NeuronCard } from "./ui";
+import { Empty, Icon, NeuronCard, type UI } from "./ui";
 import type { Brain } from "./useBrain";
 
 export interface LibraryFilter {
   q: string;
-  type: "all" | "artifact" | "site" | "memory" | "favorites";
+  type: "all" | "artifact" | "site" | "memory" | "favorites" | "edited";
   kind: "" | Kind;
   project: string;
   group: boolean;
+  sort: "recent" | "title" | "project";
 }
-export const EMPTY_FILTER: LibraryFilter = { q: "", type: "all", kind: "", project: "", group: false };
+export const EMPTY_FILTER: LibraryFilter = { q: "", type: "all", kind: "", project: "", group: false, sort: "recent" };
 
 const TYPES: [LibraryFilter["type"], string][] = [
   ["all", "Tout"],
@@ -20,9 +21,10 @@ const TYPES: [LibraryFilter["type"], string][] = [
   ["site", "Sites"],
   ["memory", "Mémoire"],
   ["favorites", "Favoris"],
+  ["edited", "Modifiés"],
 ];
 
-export function Library({ brain, filter, setFilter }: { brain: Brain; filter: LibraryFilter; setFilter: (f: LibraryFilter) => void }) {
+export function Library({ brain, ui, filter, setFilter }: { brain: Brain; ui: UI; filter: LibraryFilter; setFilter: (f: LibraryFilter) => void }) {
   const { neurons, projects, favorites } = brain;
   const set = (p: Partial<LibraryFilter>) => setFilter({ ...filter, ...p });
 
@@ -31,9 +33,14 @@ export function Library({ brain, filter, setFilter }: { brain: Brain; filter: Li
     if (filter.type === "artifact" || filter.type === "site") list = list.filter((n) => n.type === filter.type);
     if (filter.type === "memory") list = list.filter((n) => n.source === "user" || n.source === "claude");
     if (filter.type === "favorites") list = list.filter((n) => favorites.has(n.id));
+    if (filter.type === "edited") list = list.filter((n) => n.edited);
     if (filter.kind) list = list.filter((n) => n.kind === filter.kind);
     if (filter.project) list = list.filter((n) => n.project === filter.project);
-    return searchNeurons(list, filter.q, projects);
+    const found = searchNeurons(list, filter.q, projects);
+    // Avec une recherche, l'ordre de pertinence prime sur le tri choisi.
+    if (filter.q.trim() || filter.sort === "recent") return found;
+    const key = (n: Neuron) => (filter.sort === "title" ? n.title : `${projectName(n.project, projects) || "~"} ${n.title}`);
+    return [...found].sort((a, b) => key(a).localeCompare(key(b), "fr"));
   }, [neurons, projects, favorites, filter]);
 
   const usedProjects = useMemo(() => [...new Set(neurons.map((n) => n.project).filter(Boolean) as string[])], [neurons]);
@@ -44,9 +51,7 @@ export function Library({ brain, filter, setFilter }: { brain: Brain; filter: Li
   }, [results]);
   const active = filter.q || filter.type !== "all" || filter.kind || filter.project;
 
-  const card = (n: Neuron) => (
-    <NeuronCard key={n.id} n={n} projects={projects} favorite={favorites.has(n.id)} onFavorite={() => brain.toggleFavorite(n.id)} onProject={(id) => set({ project: id })} />
-  );
+  const card = (n: Neuron) => <NeuronCard key={n.id} n={n} brain={brain} ui={ui} />;
 
   return (
     <div className="view">
@@ -72,6 +77,12 @@ export function Library({ brain, filter, setFilter }: { brain: Brain; filter: Li
             <option key={k} value={k}>{label}</option>
           ))}
         </select>
+        <select value={filter.sort} onChange={(e) => set({ sort: e.target.value as LibraryFilter["sort"] })} aria-label="Tri">
+          <option value="recent">Plus récents</option>
+          <option value="title">Titre A → Z</option>
+          <option value="project">Par projet</option>
+        </select>
+        <button className="btn primary" onClick={() => ui.create({ type: "artifact" })}><Icon name="plus" size={16} /> Ajouter</button>
       </div>
 
       <div className="toolbar">
@@ -85,7 +96,7 @@ export function Library({ brain, filter, setFilter }: { brain: Brain; filter: Li
         <label className="check">
           <input type="checkbox" checked={filter.group} onChange={(e) => set({ group: e.target.checked })} /> Grouper par projet
         </label>
-        {active && <button className="btn ghost" onClick={() => setFilter({ ...EMPTY_FILTER, group: filter.group })}>Réinitialiser</button>}
+        {active && <button className="btn ghost" onClick={() => setFilter({ ...EMPTY_FILTER, group: filter.group, sort: filter.sort })}>Réinitialiser</button>}
       </div>
 
       {results.length === 0 ? (
